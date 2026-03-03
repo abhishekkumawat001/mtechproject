@@ -9,8 +9,17 @@ first download all the sar paper that have internal waves
 
 
 5.download all the data that are present in the swot to track the internal wave the unsmoothen one 
+6 . make cycle id constant and make the plots incrementing the pass ids..
+Date  25 feb 2026 
+
+doing a mesoscale phenomenon eddies by swot sattlite 
+get forword and backword pass composite on one image 
+seasions wise , days on can do 
+cyclone shakti date - 
+cyclone remal - 
+cyclone dana - 2024, oct 
+before and after the cyclone conditions have 10 to 15 days of data 
 
 
 
-make cycle id constant and make the plots incrementing the pass ids..
 
