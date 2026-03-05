@@ -14,28 +14,9 @@ warnings.filterwarnings('ignore')
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-
-# Try to import optional libraries
-try:
-    import xarray as xr
-    HAS_XARRAY = True
-except ImportError:
-    HAS_XARRAY = False
-    print("Warning: xarray not available. Some features may be limited.")
-
-try:
-    import netCDF4 as nc
-    HAS_NETCDF4 = True
-except ImportError:
-    HAS_NETCDF4 = False
-    print("Warning: netCDF4 not available. Using fallback methods.")
-
-try:
-    from scipy import signal
-    HAS_SCIPY = True
-except ImportError:
-    HAS_SCIPY = False
-    print("Warning: scipy not available. Spectral analysis will be limited.")
+import xarray as xr
+import netCDF4 as nc
+from scipy import signal
 
 # Import configuration
 try:
