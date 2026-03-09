@@ -6,10 +6,3 @@ How original passes were found: The AVISO website publishes a shapefile of every
 
 Downloads sph_science_swath.zip from AVISO into a swot_orbit_data/ folder next to your notebook.
 
-aviso msla daily data 
-ssha
-podaac sst 
-making subplots 
-and filterout the data by dates and time 
-
-work on scale on that so more features 
