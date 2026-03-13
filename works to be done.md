@@ -21,7 +21,7 @@ cyclone dana - 2024, oct
 before and after the cyclone conditions have 10 to 15 days of data 
 
 6 march
-aviso msla daily data 
+aviso msla daily data ".125 data"
 ssha
 podaac sst 
 making subplots 
@@ -29,3 +29,5 @@ and filterout the data by dates and time
 
 work on scale on that so more features 
 
+sla copernusus 
+sst podaac "grided data"
