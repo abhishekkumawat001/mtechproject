@@ -23,22 +23,25 @@ before and after the cyclone conditions have 10 to 15 days of data
 6 march
 aviso msla daily data ".125 data"
 
-
-
-
-
 ssha from copernicus website --- Global Ocean Gridded L 4 Sea Surface Heights And Derived Variables Reprocessed 1993 Ongoing
 
-
-
-
-
-
 sst podaac "grided data" ---Group for High Resolution Sea Surface Temperature (GHRSST) 
-
 
 
 making subplots 
 and filterout the data by dates and time 
 
 work on scale on that so more features 
+
+26th march 
+first look into response of all the three cyclone date wise of sst and msla
+
+2d gausian filter looking to 
+in space 
+
+sub meso scale and meso large scale features 
+first look visual into plots different 
+
+responce of cycle on these scales 
+
+
