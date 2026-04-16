@@ -1,0 +1,30 @@
+cyclone,datetime,latitude,longitude,wind_kt,pressure_hPa,phase,notes
+# Cyclone Remal - Bay of Bengal - May 2024
+# Source: IMD Best Track Archive (approximate positions pending official data)
+# Max intensity: Severe Cyclonic Storm (75 kt, 978 hPa)
+REMAL,2024-05-23 00:00,15.5,88.0,25,1004,formation,Low pressure system formed
+REMAL,2024-05-23 12:00,16.2,87.8,30,1002,formation,Intensifying depression
+REMAL,2024-05-24 00:00,17.0,87.5,35,1000,intensifying,Deep Depression
+REMAL,2024-05-24 12:00,17.8,87.3,45,996,intensifying,Cyclonic Storm
+REMAL,2024-05-25 00:00,18.5,87.2,55,990,intensifying,Severe Cyclonic Storm
+REMAL,2024-05-25 12:00,19.2,87.5,60,985,intensifying,SCS continuing
+REMAL,2024-05-26 00:00,19.8,88.0,70,980,peak,Near peak intensity
+REMAL,2024-05-26 12:00,20.5,88.5,75,978,peak,Peak intensity
+REMAL,2024-05-27 00:00,21.2,89.0,65,984,weakening,Approaching landfall
+REMAL,2024-05-27 06:00,21.6,89.2,55,988,landfall,Landfall near Sagar Island/Bangladesh
+REMAL,2024-05-27 12:00,21.8,89.3,50,990,weakening,Over land
+REMAL,2024-05-28 00:00,22.5,89.5,35,996,dissipating,Weakening over land
+REMAL,2024-05-28 12:00,23.0,89.8,25,1000,dissipated,Remnant low
+# Cyclone Dana - Bay of Bengal - October 2024
+# Source: IMD Best Track Archive (approximate positions pending official data)
+# Max intensity: Severe Cyclonic Storm (75 kt, 972 hPa)
+DANA,2024-10-22 00:00,15.0,87.5,25,1006,formation,Low pressure over central BoB
+DANA,2024-10-22 12:00,15.8,87.2,30,1004,formation,Well-marked low
+DANA,2024-10-23 00:00,16.5,87.0,40,1000,intensifying,Depression formed
+DANA,2024-10-23 12:00,17.2,86.8,50,992,intensifying,Deep Depression/Cyclonic Storm
+DANA,2024-10-24 00:00,18.0,86.5,65,980,intensifying,Severe Cyclonic Storm
+DANA,2024-10-24 12:00,18.8,86.8,75,972,peak,Peak intensity
+DANA,2024-10-25 00:00,19.5,87.2,70,976,weakening,Approaching Odisha coast
+DANA,2024-10-25 06:00,20.2,87.5,55,988,landfall,Landfall near Bhitarkanika
+DANA,2024-10-25 12:00,20.8,87.8,40,996,dissipating,Over land
+DANA,2024-10-26 00:00,21.5,88.2,25,1002,dissipated,Remnant low over Jharkhand

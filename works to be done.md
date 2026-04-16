@@ -17,7 +17,7 @@ get forword and backword pass composite on one image
 seasions wise , days on can do 
 cyclone shakti date - 
 cyclone remal - 
-cyclone dana - 2024, oct 
+cyclone dana - 2024, oct th march work
 before and after the cyclone conditions have 10 to 15 days of data 
 
 6 march
@@ -39,9 +39,19 @@ first look into response of all the three cyclone date wise of sst and msla
 2d gausian filter looking to 
 in space 
 
-sub meso scale and meso large scale features 
+sub meso scale and meso large scale features  == sub meso scale feature 10km , 
 first look visual into plots different 
 
 responce of cycle on these scales 
+
+1 april 
+
+colorbar scale change so that features of the sst be more prominant
+
+also modify the sub mesoscale feature from 50 km to 10 km 
+also modify the mesoscale features from 
+frequency cutout in meso scale features 
+
+
 
 
