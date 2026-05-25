@@ -15,11 +15,7 @@ from datetime import datetime, timedelta
 # CONFIGURATION & PATHS
 # =============================================================================
 SST_DATA_DIR = r"C:\Users\abhik\Downloads\New_folder\MUR-JPL-L4-GLOB-v4.1_4.1-20260316_132446"
-MSLA_ROOT_DIR = os.path.join(
-    r"C:\Users\abhik\Downloads",
-    "SEALEVEL_GLO_PHY_L4_MY_008_047 "
-    "cmems_obs-sl_glo_phy-ssh_my_allsat-l4-duacs-0.125deg_P1D 2024 01",
-)
+MSLA_ROOT_DIR = r"C:\Users\abhik\Downloads\SEALEVEL_GLO_PHY_L4_MY_008_047_cmems_obs-sl_glo_phy-ssh_my_allsat-l4-duacs-0.125deg_P1D_2024"
 
 # SST: 0.05°/pixel ≈ 5.55 km/pixel at 19°N
 FILTER_SCALES = {
@@ -72,7 +68,19 @@ def _make_square_bbox(bbox, track):
 def _get_analysis_window_ranges(cyc):
     """Extract pre, during, post windows from cyclone dict."""
     ad = cyc.get('analysis_dates', {})
-    return [(k, v[0], v[1]) for k, v in ad.items()]
+    if ad:
+        return [(k, v[0], v[1]) for k, v in ad.items()]
+    
+    from datetime import timedelta
+    import pandas as pd
+    dates = cyc.get('dates', {})
+    if not dates.get('formation') or not dates.get('dissipation'):
+        return []
+    fmt = '%Y-%m-%d'
+    formation = pd.to_datetime(dates['formation'])
+    pre_start = (formation - timedelta(days=5)).strftime(fmt)
+    pre_end = (formation - timedelta(days=1)).strftime(fmt)
+    return [('pre', pre_start, pre_end), ('during', dates['formation'], dates['dissipation'])]
 
 def _get_analysis_date_list_from_range(start_str, end_str):
     """Generate list of dates between start and end."""
@@ -97,10 +105,8 @@ def load_sst_for_date(date, region):
     return sst
 
 def load_msla_dataset(bbox):
-    file_list = []
-    for m in range(1, 13):
-        pattern = os.path.join(MSLA_ROOT_DIR, f"{m:02d}", "*.nc")
-        file_list.extend(sorted(glob.glob(pattern)))
+    pattern = os.path.join(MSLA_ROOT_DIR, "*.nc")
+    file_list = sorted(glob.glob(pattern))
     datasets = []
     for fp in file_list:
         d = xr.open_dataset(fp).sel(
@@ -108,24 +114,25 @@ def load_msla_dataset(bbox):
             longitude=slice(bbox['lon_min'], bbox['lon_max'])
         ).load()
         datasets.append(d)
+    if not datasets:
+        raise ValueError(f"No MSLA files found in {MSLA_ROOT_DIR}")
     return xr.concat(datasets, dim="time")
 
 def load_msla_for_date(date, bbox):
-    global DS_MSLA
-    if DS_MSLA is None:
-        BBOX_FULL = {'lat_min': 5, 'lat_max': 25, 'lon_min': 80, 'lon_max': 100}
-        DS_MSLA = load_msla_dataset(BBOX_FULL)
-    
-    target = pd.Timestamp(date).normalize()
-    t = pd.to_datetime(DS_MSLA.time.values).normalize()
-    idx = np.where(t == target)[0]
-    if len(idx) > 0:
-        return DS_MSLA['sla'].isel(time=idx[0]).sel(
-            latitude=slice(bbox['lat_min'], bbox['lat_max']),
-            longitude=slice(bbox['lon_min'], bbox['lon_max'])
-        )
-    return None
-
+    if isinstance(date, pd.Timestamp):
+        date = date.to_pydatetime()
+    date_str = date.strftime('%Y%m%d')
+    pattern = os.path.join(MSLA_ROOT_DIR, f'*_{date_str}_*.nc')
+    files = glob.glob(pattern)
+    if not files:
+        return None
+    ds = xr.open_dataset(files[0])
+    sla = ds['sla'].squeeze('time', drop=True).sel(
+        latitude=slice(bbox['lat_min'], bbox['lat_max']), 
+        longitude=slice(bbox['lon_min'], bbox['lon_max'])
+    )
+    # Don't close immediately if you need later? Xarray handles it
+    return sla
 def scale_decomposition(field_2d, grid_res, filter_scales, ref_lat=19.0):
     data = field_2d.values.astype(float).copy() if hasattr(field_2d, 'values') else np.asarray(field_2d).copy()
     mask = np.isnan(data)
