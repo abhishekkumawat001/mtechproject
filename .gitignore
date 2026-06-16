@@ -129,6 +129,7 @@ swot_analysis_output/
 *_stats_*.csv
 *_enhanced_analysis_*.csv
 swot_ssh_summary.csv
+*.csv
 
 # Generated plots and figures
 *.png
@@ -299,3 +300,9 @@ cache/
 
 # Files larger than 100MB should not be committed
 # Use Git LFS for large files if needed
+
+ibtracs_*.csv 
+*.json data 
+*.zip
+*.csv
+
