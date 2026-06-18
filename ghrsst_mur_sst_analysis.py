@@ -7,11 +7,12 @@ Resolution: 0.01° global grid (~36000 x 18000 pixels per file)
 Frequency: Daily files
 
 This script:
-  1. Explores the NetCDF dataset structure
-  2. Creates monthly mean SST maps (12-panel figure)
-  3. Creates daily SST maps for a user-specified date range
+  1. Interactively collects all configuration at runtime
+  2. Explores the NetCDF dataset structure
+  3. Creates monthly mean SST maps (12-panel figure)
+  4. Creates daily SST maps for a user-specified date range
 
-Author: Generated for geospatial SST analysis
+Author: Abhishek kumawat
 """
 
 import os
@@ -27,161 +28,226 @@ import xarray as xr
 import matplotlib.pyplot as plt
 import cartopy.crs as ccrs
 import cartopy.feature as cfeature
-from matplotlib.colors import Normalize
 
-# Suppress non-critical warnings
 warnings.filterwarnings("ignore", category=RuntimeWarning)
 warnings.filterwarnings("ignore", category=UserWarning)
 warnings.filterwarnings("ignore", category=FutureWarning)
 
+
 # =============================================================================
-# CONFIGURATION BLOCK (User edits only here)
+# INTERACTIVE INPUT HELPERS
 # =============================================================================
 
-# Paths
-DATA_DIR = r"C:\Users\abhik\Downloads\New folder\MUR-JPL-L4-GLOB-v4.1_4.1-20260316_132446"
-OUTPUT_DIR = r"C:\Users\abhik\Downloads\New folder\SST_Plots"
+def ask(prompt_text, default=None, cast=str, choices=None):
+    """
+    Prompt the user for input with an optional default and type cast.
 
-# Region of interest: [lon_min, lon_max, lat_min, lat_max] or None for global
-# Example: [40, 100, -10, 30] for Indian Ocean
-REGION = [40, 100, -10, 30]  # Set to None for global view
+    Parameters
+    ----------
+    prompt_text : str
+    default : any
+        Shown in brackets; returned if user presses Enter with no input.
+    cast : callable
+        Type to cast the answer to (e.g. int, float, str).
+    choices : list or None
+        If provided, only accept values in this list (case-insensitive for str).
+    """
+    suffix = f" [{default}]" if default is not None else ""
+    while True:
+        raw = input(f"  {prompt_text}{suffix}: ").strip()
+        if raw == "" and default is not None:
+            return default
+        if raw == "":
+            print("    (required — please enter a value)")
+            continue
+        try:
+            value = cast(raw)
+        except (ValueError, TypeError):
+            print(f"    (invalid — expected {cast.__name__})")
+            continue
+        if choices is not None:
+            check = value.lower() if isinstance(value, str) else value
+            if check not in [c.lower() if isinstance(c, str) else c for c in choices]:
+                print(f"    (choose from: {', '.join(str(c) for c in choices)})")
+                continue
+        return value
 
-# Year to analyze
-YEAR = 2024
 
-# Colormap settings
-SST_CMAP = "RdYlBu_r"  # Colormap for SST (red=warm, blue=cold)
-SST_VMIN = -2.0        # Minimum SST in °C
-SST_VMAX = 32.0        # Maximum SST in °C
+def ask_yes_no(prompt_text, default=True):
+    """Ask a yes/no question, returns bool."""
+    default_str = "y" if default else "n"
+    raw = ask(prompt_text + " (y/n)", default=default_str, cast=str, choices=["y", "n"])
+    return raw.lower() == "y"
 
-# Performance: spatial downsampling factor (1=full resolution, 5=fast, 10=very fast)
-DOWNSAMPLE = 5
 
-# Daily plot configuration
-DAILY_MONTH = 11       # Month number (1-12) for daily visualization
-DAILY_DAY_START = 1    # Start day of range
-DAILY_DAY_END = 30     # End day of range
-DAYS_PER_ROW = 5       # Number of subplot columns in daily panel figure
+def ask_path(prompt_text, must_exist=False):
+    """Ask for a directory path, expanding ~ and env vars."""
+    while True:
+        raw = input(f"  {prompt_text}: ").strip().strip('"').strip("'")
+        if not raw:
+            print("    (required — please enter a path)")
+            continue
+        path = os.path.expandvars(os.path.expanduser(raw))
+        if must_exist and not os.path.isdir(path):
+            print(f"    (directory not found: {path})")
+            continue
+        return path
+
+
+def ask_region():
+    """
+    Ask the user for a lat/lon bounding box or global.
+    Returns [lon_min, lon_max, lat_min, lat_max] or None for global.
+    """
+    global_plot = ask_yes_no("Plot global domain (skip lat/lon input)?", default=False)
+    if global_plot:
+        return None
+
+    print("  Enter bounding box (decimal degrees):")
+    lon_min = ask("    Lon min (e.g. 40 for 40°E)", cast=float)
+    lon_max = ask("    Lon max (e.g. 100 for 100°E)", cast=float)
+    lat_min = ask("    Lat min (e.g. -10 for 10°S)", cast=float)
+    lat_max = ask("    Lat max (e.g.  30 for 30°N)", cast=float)
+    return [lon_min, lon_max, lat_min, lat_max]
+
+
+def ask_year_selection(available_years):
+    """
+    Show available years and let the user choose one or all.
+    Returns a list of ints.
+    """
+    years_str = ", ".join(str(y) for y in sorted(available_years))
+    print(f"\n  Years found in dataset: {years_str}")
+    print("  Enter a single year (e.g. 2024) or 'all' for every year found.")
+    while True:
+        raw = input("  Year(s) to analyze: ").strip()
+        if raw.lower() == "all":
+            return sorted(available_years)
+        try:
+            year = int(raw)
+            if year in available_years:
+                return [year]
+            print(f"    (year {year} not in dataset — choose from: {years_str})")
+        except ValueError:
+            print("    (enter a 4-digit year or 'all')")
+
+
+def ask_month():
+    """Ask for a month number 1-12, return int."""
+    while True:
+        raw = input("  Month (1-12): ").strip()
+        try:
+            m = int(raw)
+            if 1 <= m <= 12:
+                return m
+            print("    (must be 1–12)")
+        except ValueError:
+            print("    (enter a number 1–12)")
+
+
+def collect_config(available_years):
+    """
+    Interactively collect all runtime settings.
+    Returns a dict with all configuration values.
+    """
+    cfg = {}
+
+    # ---- Directories ----
+    print("\n--- Directories ---")
+    cfg["data_dir"] = ask_path("Data directory (contains .nc files)", must_exist=True)
+    cfg["output_dir"] = ask_path("Output directory (will be created if absent)")
+
+    # ---- Region ----
+    print("\n--- Region ---")
+    cfg["region"] = ask_region()
+
+    # ---- Year selection ----
+    print("\n--- Year selection ---")
+    cfg["years"] = ask_year_selection(available_years)
+
+    # ---- Plot types ----
+    print("\n--- Plot types ---")
+    print("  [1] Monthly mean maps only  (12-panel, one per year)")
+    print("  [2] Daily maps only         (specific month & day range)")
+    print("  [3] Both monthly and daily")
+    plot_choice = ask("Choice", default="3", cast=str, choices=["1", "2", "3"])
+    cfg["do_monthly"] = plot_choice in ("1", "3")
+    cfg["do_daily"]   = plot_choice in ("2", "3")
+
+    # ---- Daily plot settings ----
+    if cfg["do_daily"]:
+        print("\n--- Daily plot settings ---")
+        if len(cfg["years"]) > 1:
+            print("  (daily plot will be generated for each selected year)")
+        cfg["daily_month"]     = ask_month()
+        cfg["daily_day_start"] = ask("Start day", default=1,  cast=int)
+        cfg["daily_day_end"]   = ask("End day",   default=30, cast=int)
+        cfg["days_per_row"]    = ask("Subplots per row", default=5, cast=int)
+
+    # ---- Colormap / rendering ----
+    print("\n--- Colormap & rendering (press Enter to accept defaults) ---")
+    cfg["cmap"]       = ask("Colormap name",         default="RdYlBu_r")
+    cfg["vmin"]       = ask("SST min (°C)",           default=-2.0, cast=float)
+    cfg["vmax"]       = ask("SST max (°C)",           default=32.0, cast=float)
+    cfg["downsample"] = ask("Downsample factor (1=full res, 5=fast)", default=5, cast=int)
+
+    return cfg
+
 
 # =============================================================================
 # BLOCK 1: HELPER FUNCTIONS
 # =============================================================================
 
 def extract_date_from_filename(filepath):
-    """
-    Parse YYYYMMDD from the first 8 characters of the filename.
-
-    Parameters
-    ----------
-    filepath : str
-        Full path to the NetCDF file
-
-    Returns
-    -------
-    datetime
-        Python datetime object representing the file date
-    """
+    """Parse YYYYMMDD from the first 8 characters of the filename."""
     filename = os.path.basename(filepath)
     match = re.match(r'^(\d{8})', filename)
     if match:
-        date_str = match.group(1)
-        return datetime.strptime(date_str, '%Y%m%d')
-    else:
-        raise ValueError(f"Cannot parse date from filename: {filename}")
+        return datetime.strptime(match.group(1), '%Y%m%d')
+    raise ValueError(f"Cannot parse date from filename: {filename}")
 
 
 def load_sst(filepath, region=None, downsample=1):
-    """
-    Load SST data from a NetCDF file with optional region subsetting and downsampling.
-
-    Parameters
-    ----------
-    filepath : str
-        Path to the NetCDF file
-    region : list or None
-        [lon_min, lon_max, lat_min, lat_max] for subsetting, or None for full domain
-    downsample : int
-        Spatial subsampling factor (1=full resolution)
-
-    Returns
-    -------
-    xr.DataArray
-        SST data in degrees Celsius, with time dimension squeezed
-    """
+    """Load SST data from a NetCDF file, subset to region, return in °C."""
     ds = xr.open_dataset(filepath)
-
-    # Extract SST and squeeze the time dimension (always size 1)
     sst = ds['analysed_sst'].squeeze('time')
 
-    # Subset to region if specified
     if region is not None:
         lon_min, lon_max, lat_min, lat_max = region
         sst = sst.sel(lon=slice(lon_min, lon_max), lat=slice(lat_min, lat_max))
 
-    # Convert Kelvin to Celsius
-    sst = sst - 273.15
+    sst = sst - 273.15  # Kelvin → Celsius
 
-    # Apply spatial downsampling
     if downsample > 1:
         sst = sst[::downsample, ::downsample]
 
-    # Close the dataset to free memory
     ds.close()
-
     return sst
 
 
 def make_sst_map(ax, sst_data, title, vmin, vmax, cmap, show_cbar=False):
-    """
-    Create an SST map on a Cartopy axis with coastlines, borders, and gridlines.
-
-    Parameters
-    ----------
-    ax : matplotlib.axes.Axes
-        Cartopy GeoAxes object
-    sst_data : xr.DataArray
-        SST data to plot (must have lat/lon coordinates)
-    title : str
-        Title for the subplot
-    vmin, vmax : float
-        Colorbar range (min/max SST in °C)
-    cmap : str
-        Matplotlib colormap name
-    show_cbar : bool
-        Whether to add an individual colorbar (default False for shared colorbar)
-
-    Returns
-    -------
-    matplotlib.collections.QuadMesh
-        The pcolormesh image handle (useful for shared colorbar)
-    """
-    # Get coordinate arrays
+    """Draw an SST map on a Cartopy axis; returns the image handle."""
     lon = sst_data.coords['lon'].values
     lat = sst_data.coords['lat'].values
 
-    # Add map features
-    ax.add_feature(cfeature.LAND, facecolor='lightgray', zorder=1)
-    ax.add_feature(cfeature.COASTLINE, linewidth=0.5, zorder=2)
-    ax.add_feature(cfeature.BORDERS, linewidth=0.3, linestyle='--', zorder=2)
+    ax.add_feature(cfeature.LAND,      facecolor='lightgray', zorder=1)
+    ax.add_feature(cfeature.COASTLINE, linewidth=0.5,         zorder=2)
+    ax.add_feature(cfeature.BORDERS,   linewidth=0.3, linestyle='--', zorder=2)
 
-    # Add gridlines
     gl = ax.gridlines(draw_labels=True, linewidth=0.3, color='gray',
                       alpha=0.5, linestyle='--')
-    gl.top_labels = False
+    gl.top_labels   = False
     gl.right_labels = False
     gl.xlabel_style = {'size': 7}
     gl.ylabel_style = {'size': 7}
 
-    # Plot SST data
     img = ax.pcolormesh(lon, lat, sst_data.values,
                         transform=ccrs.PlateCarree(),
                         cmap=cmap, vmin=vmin, vmax=vmax,
                         shading='auto', zorder=0)
 
-    # Set title
     ax.set_title(title, fontsize=10, fontweight='bold')
 
-    # Optional individual colorbar
     if show_cbar:
         plt.colorbar(img, ax=ax, orientation='horizontal',
                      label='SST (°C)', pad=0.05, shrink=0.8)
@@ -190,68 +256,50 @@ def make_sst_map(ax, sst_data, title, vmin, vmax, cmap, show_cbar=False):
 
 
 def get_files_for_month(all_files, year, month):
-    """
-    Filter files to get those matching a specific year and month.
-
-    Parameters
-    ----------
-    all_files : list
-        List of all NetCDF file paths
-    year : int
-        Year to filter (e.g., 2024)
-    month : int
-        Month to filter (1-12)
-
-    Returns
-    -------
-    dict
-        Dictionary mapping day number (int) to filepath
-    """
+    """Return {day: filepath} for files matching year and month."""
     month_files = {}
     for filepath in all_files:
         try:
-            file_date = extract_date_from_filename(filepath)
-            if file_date.year == year and file_date.month == month:
-                month_files[file_date.day] = filepath
+            d = extract_date_from_filename(filepath)
+            if d.year == year and d.month == month:
+                month_files[d.day] = filepath
         except ValueError:
             continue
     return month_files
+
+
+def scan_dataset(data_dir):
+    """
+    Scan data_dir for *.nc files, return (sorted file list, set of years).
+    """
+    pattern = os.path.join(data_dir, "*.nc")
+    all_files = sorted(glob.glob(pattern))
+
+    years = set()
+    for f in all_files:
+        try:
+            years.add(extract_date_from_filename(f).year)
+        except ValueError:
+            pass
+
+    return all_files, years
 
 
 # =============================================================================
 # BLOCK 2: DATA EXPLORER
 # =============================================================================
 
-def explore_dataset(data_dir):
-    """
-    Explore the GHRSST MUR dataset: file count, date range, and structure.
-
-    Parameters
-    ----------
-    data_dir : str
-        Directory containing the NetCDF files
-
-    Returns
-    -------
-    list
-        Sorted list of all NetCDF file paths
-    """
+def explore_dataset(all_files, years):
+    """Print dataset summary (file count, date range, structure)."""
+    print("\n" + "=" * 70)
+    print("DATASET EXPLORATION")
     print("=" * 70)
-    print("BLOCK 2: DATA EXPLORATION")
-    print("=" * 70)
+    print(f"\n  Total .nc files found : {len(all_files)}")
+    print(f"  Years available       : {', '.join(str(y) for y in sorted(years))}")
 
-    # Find all NetCDF files
-    pattern = os.path.join(data_dir, "*.nc")
-    all_files = sorted(glob.glob(pattern))
+    if not all_files:
+        return
 
-    print(f"\nTotal files found: {len(all_files)}")
-
-    if len(all_files) == 0:
-        print("ERROR: No .nc files found in the specified directory!")
-        print(f"Directory: {data_dir}")
-        return []
-
-    # Parse dates from filenames
     dates = []
     for f in all_files:
         try:
@@ -261,238 +309,135 @@ def explore_dataset(data_dir):
 
     if dates:
         dates_sorted = sorted(dates)
-        print(f"Date range: {dates_sorted[0].strftime('%Y-%m-%d')} → "
-              f"{dates_sorted[-1].strftime('%Y-%m-%d')}")
+        print(f"  Date range            : {dates_sorted[0]:%Y-%m-%d}  →  "
+              f"{dates_sorted[-1]:%Y-%m-%d}")
 
-        # List available months
-        months_avail = sorted(set((d.year, d.month) for d in dates))
-        print(f"Months available ({len(months_avail)} total):")
-        for y, m in months_avail:
-            count = sum(1 for d in dates if d.year == y and d.month == m)
-            print(f"  {y}-{m:02d}: {count} files")
-
-    # Open one sample file to explore structure
-    print("\n" + "-" * 50)
-    print("SAMPLE FILE STRUCTURE")
-    print("-" * 50)
-
-    sample_file = all_files[0]
-    print(f"\nSample file: {os.path.basename(sample_file)}\n")
-
-    ds = xr.open_dataset(sample_file)
-    print(ds)
-
-    print("\n" + "-" * 50)
-    print("VARIABLE DETAILS")
-    print("-" * 50)
+    # Sample file structure
+    print("\n  Sample file structure:")
+    ds = xr.open_dataset(all_files[0])
+    print(f"    File : {os.path.basename(all_files[0])}")
     for var_name in ds.data_vars:
-        var = ds[var_name]
-        units = var.attrs.get('units', 'N/A')
-        long_name = var.attrs.get('long_name', 'N/A')
-        print(f"\n  {var_name}:")
-        print(f"    Units: {units}")
-        print(f"    Long name: {long_name}")
-        print(f"    Shape: {var.shape}")
-
+        v = ds[var_name]
+        print(f"    Var  : {var_name}  shape={v.shape}  "
+              f"units={v.attrs.get('units','?')}")
     ds.close()
-    print("\n")
-
-    return all_files
 
 
 # =============================================================================
 # BLOCK 3: MONTHLY AVERAGE PLOTS
 # =============================================================================
 
-def create_monthly_mean_plots(all_files, output_dir, year, region, downsample,
-                               vmin, vmax, cmap):
+def create_monthly_mean_plots(all_files, cfg, year):
     """
-    Create a 3x4 panel figure showing monthly mean SST for each month.
-
-    Parameters
-    ----------
-    all_files : list
-        List of all NetCDF file paths
-    output_dir : str
-        Directory to save the output figure
-    year : int
-        Year to process
-    region : list or None
-        [lon_min, lon_max, lat_min, lat_max] or None for global
-    downsample : int
-        Spatial downsampling factor
-    vmin, vmax : float
-        Colorbar limits
-    cmap : str
-        Colormap name
-
-    Returns
-    -------
-    str
-        Path to the saved figure
+    Create a 3×4 panel figure of monthly mean SST for the given year.
+    Saved to <output_dir>/SST_Monthly_Mean_<year>.png
     """
-    print("=" * 70)
-    print("BLOCK 3: MONTHLY AVERAGE PLOTS")
+    print(f"\n{'='*70}")
+    print(f"MONTHLY MEAN MAPS — {year}")
     print("=" * 70)
 
-    # Ensure output directory exists
-    os.makedirs(output_dir, exist_ok=True)
+    os.makedirs(cfg["output_dir"], exist_ok=True)
 
-    # Create figure with 3x4 subplot grid
     fig, axes = plt.subplots(nrows=3, ncols=4, figsize=(18, 12),
                              subplot_kw={'projection': ccrs.PlateCarree()})
     axes = axes.flatten()
-
     img_handle = None
-    files_processed = 0
 
-    # Process each month
     for month_idx in range(12):
         month_num = month_idx + 1
         ax = axes[month_idx]
+        print(f"  {month_name[month_num]:>12} {year} ... ", end="", flush=True)
 
-        print(f"Processing {month_name[month_num]} {year}...", end=" ")
-
-        # Get files for this month
         month_files = get_files_for_month(all_files, year, month_num)
 
-        if len(month_files) == 0:
-            # No data for this month
+        if not month_files:
             ax.set_title(f"{month_name[month_num]} (no data)", fontsize=10)
             ax.axis('off')
             print("no data")
             continue
 
-        # Load all daily SST arrays for this month
         daily_sst_list = []
         for day, filepath in sorted(month_files.items()):
             try:
-                sst = load_sst(filepath, region, downsample)
-                daily_sst_list.append(sst)
-                files_processed += 1
+                daily_sst_list.append(load_sst(filepath, cfg["region"],
+                                                cfg["downsample"]))
             except Exception as e:
-                print(f"\n    Warning: Failed to load day {day}: {e}")
+                print(f"\n    Warning day {day}: {e}", end="")
 
-        if len(daily_sst_list) == 0:
+        if not daily_sst_list:
             ax.set_title(f"{month_name[month_num]} (load error)", fontsize=10)
             ax.axis('off')
             print("load error")
             continue
 
-        # Stack and compute monthly mean
-        monthly_stack = xr.concat(daily_sst_list, dim='day')
-        monthly_mean = monthly_stack.mean(dim='day')
-
-        # Plot
+        monthly_mean = xr.concat(daily_sst_list, dim='day').mean(dim='day')
         img_handle = make_sst_map(ax, monthly_mean, month_name[month_num],
-                                   vmin, vmax, cmap, show_cbar=False)
+                                   cfg["vmin"], cfg["vmax"], cfg["cmap"])
 
-        # Set extent if region is specified
-        if region is not None:
-            ax.set_extent(region, crs=ccrs.PlateCarree())
+        if cfg["region"] is not None:
+            ax.set_extent(cfg["region"], crs=ccrs.PlateCarree())
 
         print(f"done ({len(daily_sst_list)} days)")
 
-    # Add shared colorbar at bottom
     if img_handle is not None:
         cbar_ax = fig.add_axes([0.15, 0.04, 0.7, 0.02])
         cbar = fig.colorbar(img_handle, cax=cbar_ax, orientation='horizontal',
                             extend='both')
         cbar.set_label('Sea Surface Temperature (°C)', fontsize=12)
 
-    # Main title
-    region_str = "Global" if region is None else f"Region [{region[0]}°-{region[1]}°E, {region[2]}°-{region[3]}°N]"
-    fig.suptitle(f"MUR GHRSST — Monthly Mean SST (°C) | {year}\n{region_str}",
+    region_label = ("Global" if cfg["region"] is None
+                    else (f"[{cfg['region'][0]}°–{cfg['region'][1]}°E, "
+                          f"{cfg['region'][2]}°–{cfg['region'][3]}°N]"))
+    fig.suptitle(f"MUR GHRSST — Monthly Mean SST (°C) | {year}\n{region_label}",
                  fontsize=14, fontweight='bold', y=0.98)
-
     plt.tight_layout(rect=[0, 0.06, 1, 0.95])
 
-    # Save figure
-    output_path = os.path.join(output_dir, f"SST_Monthly_Mean_{year}.png")
-    fig.savefig(output_path, dpi=150, bbox_inches='tight', facecolor='white')
+    out_path = os.path.join(cfg["output_dir"], f"SST_Monthly_Mean_{year}.png")
+    fig.savefig(out_path, dpi=150, bbox_inches='tight', facecolor='white')
     plt.close(fig)
-
-    print(f"\nMonthly plot saved: {output_path}")
-    print(f"Total files processed: {files_processed}")
-
-    return output_path
+    print(f"\n  Saved: {out_path}")
+    return out_path
 
 
 # =============================================================================
-# BLOCK 4: DAILY PLOTS (Flexible Date Range)
+# BLOCK 4: DAILY PLOTS
 # =============================================================================
 
-def create_daily_plots(all_files, output_dir, year, month, day_start, day_end,
-                       days_per_row, region, downsample, vmin, vmax, cmap):
+def create_daily_plots(all_files, cfg, year):
     """
-    Create a panel figure showing daily SST maps for a specified date range.
-
-    Parameters
-    ----------
-    all_files : list
-        List of all NetCDF file paths
-    output_dir : str
-        Directory to save the output figure
-    year : int
-        Year to process
-    month : int
-        Month number (1-12)
-    day_start, day_end : int
-        Day range (inclusive)
-    days_per_row : int
-        Number of subplot columns
-    region : list or None
-        [lon_min, lon_max, lat_min, lat_max] or None for global
-    downsample : int
-        Spatial downsampling factor
-    vmin, vmax : float
-        Colorbar limits
-    cmap : str
-        Colormap name
-
-    Returns
-    -------
-    str
-        Path to the saved figure
+    Create a panel figure of daily SST maps for the configured month & day range.
+    Saved to <output_dir>/SST_Daily_<year>_<month>_Day<start>-<end>.png
     """
-    print("\n" + "=" * 70)
-    print("BLOCK 4: DAILY PLOTS")
+    month    = cfg["daily_month"]
+    day_start = cfg["daily_day_start"]
+    day_end   = cfg["daily_day_end"]
+
+    print(f"\n{'='*70}")
+    print(f"DAILY MAPS — {month_name[month]} {year}, "
+          f"days {day_start}–{day_end}")
     print("=" * 70)
 
-    # Ensure output directory exists
-    os.makedirs(output_dir, exist_ok=True)
+    os.makedirs(cfg["output_dir"], exist_ok=True)
 
-    # Get files for the specified month
     month_files = get_files_for_month(all_files, year, month)
+    days_to_plot = [(d, month_files[d])
+                    for d in range(day_start, day_end + 1)
+                    if d in month_files]
 
-    # Filter to the requested day range
-    days_to_plot = []
-    for day in range(day_start, day_end + 1):
-        if day in month_files:
-            days_to_plot.append((day, month_files[day]))
-
-    if len(days_to_plot) == 0:
-        print(f"ERROR: No data files found for {month_name[month]} {year}, "
-              f"days {day_start}-{day_end}")
+    if not days_to_plot:
+        print(f"  No data files found for {month_name[month]} {year}, "
+              f"days {day_start}–{day_end}")
         return None
 
-    print(f"\nPlotting {len(days_to_plot)} days for {month_name[month]} {year}")
-    print(f"Day range: {day_start} - {day_end}")
+    print(f"  Plotting {len(days_to_plot)} day(s)...")
 
-    # Compute subplot grid dimensions
-    n_days = len(days_to_plot)
-    ncols = min(days_per_row, n_days)
-    nrows = ceil(n_days / ncols)
-
-    # Create figure
-    fig_width = 4 * ncols
-    fig_height = 3.5 * nrows + 1  # Extra space for colorbar
+    ncols = min(cfg["days_per_row"], len(days_to_plot))
+    nrows = ceil(len(days_to_plot) / ncols)
 
     fig, axes = plt.subplots(nrows=nrows, ncols=ncols,
-                             figsize=(fig_width, fig_height),
+                             figsize=(4 * ncols, 3.5 * nrows + 1),
                              subplot_kw={'projection': ccrs.PlateCarree()})
 
-    # Handle single row/column cases
     if nrows == 1 and ncols == 1:
         axes = np.array([[axes]])
     elif nrows == 1:
@@ -501,127 +446,110 @@ def create_daily_plots(all_files, output_dir, year, month, day_start, day_end,
         axes = axes.reshape(-1, 1)
 
     axes_flat = axes.flatten()
-
     img_handle = None
 
-    # Plot each day
     for idx, (day, filepath) in enumerate(days_to_plot):
         ax = axes_flat[idx]
-
         date_str = f"{year}-{month:02d}-{day:02d}"
-        print(f"  Plotting {month_name[month]} {day:02d}...", end=" ")
-
+        print(f"    {date_str} ... ", end="", flush=True)
         try:
-            sst = load_sst(filepath, region, downsample)
-            img_handle = make_sst_map(ax, sst, date_str, vmin, vmax, cmap,
-                                       show_cbar=False)
-
-            # Set extent if region is specified
-            if region is not None:
-                ax.set_extent(region, crs=ccrs.PlateCarree())
-
+            sst = load_sst(filepath, cfg["region"], cfg["downsample"])
+            img_handle = make_sst_map(ax, sst, date_str,
+                                       cfg["vmin"], cfg["vmax"], cfg["cmap"])
+            if cfg["region"] is not None:
+                ax.set_extent(cfg["region"], crs=ccrs.PlateCarree())
             print("done")
-
         except Exception as e:
             ax.set_title(f"{date_str}\n(error)", fontsize=9)
             ax.axis('off')
             print(f"error: {e}")
 
-    # Hide unused axes
-    for idx in range(n_days, len(axes_flat)):
+    for idx in range(len(days_to_plot), len(axes_flat)):
         axes_flat[idx].axis('off')
 
-    # Add shared colorbar at bottom
     if img_handle is not None:
         cbar_ax = fig.add_axes([0.15, 0.04, 0.7, 0.015])
         cbar = fig.colorbar(img_handle, cax=cbar_ax, orientation='horizontal',
                             extend='both')
         cbar.set_label('Sea Surface Temperature (°C)', fontsize=11)
 
-    # Main title
-    region_str = "Global" if region is None else f"Region [{region[0]}°-{region[1]}°E, {region[2]}°-{region[3]}°N]"
+    region_label = ("Global" if cfg["region"] is None
+                    else (f"[{cfg['region'][0]}°–{cfg['region'][1]}°E, "
+                          f"{cfg['region'][2]}°–{cfg['region'][3]}°N]"))
     fig.suptitle(f"MUR GHRSST — Daily SST (°C) | {month_name[month]} {year} "
-                 f"(Day {day_start}–{day_end})\n{region_str}",
+                 f"(Day {day_start}–{day_end})\n{region_label}",
                  fontsize=13, fontweight='bold', y=0.98)
-
     plt.tight_layout(rect=[0, 0.06, 1, 0.94])
 
-    # Save figure
-    output_filename = f"SST_Daily_{year}_{month:02d}_Day{day_start:02d}-{day_end:02d}.png"
-    output_path = os.path.join(output_dir, output_filename)
-    fig.savefig(output_path, dpi=150, bbox_inches='tight', facecolor='white')
+    fname = (f"SST_Daily_{year}_{month:02d}"
+             f"_Day{day_start:02d}-{day_end:02d}.png")
+    out_path = os.path.join(cfg["output_dir"], fname)
+    fig.savefig(out_path, dpi=150, bbox_inches='tight', facecolor='white')
     plt.close(fig)
-
-    print(f"\nDaily plot saved: {output_path}")
-
-    return output_path
+    print(f"\n  Saved: {out_path}")
+    return out_path
 
 
 # =============================================================================
-# MAIN EXECUTION
+# MAIN
 # =============================================================================
 
 def main():
-    """Main entry point for the GHRSST MUR SST analysis script."""
-
     print("\n" + "=" * 70)
-    print("GHRSST MUR JPL L4 SST ANALYSIS")
+    print("  GHRSST MUR JPL L4 SST ANALYSIS  —  Interactive Mode")
     print("=" * 70)
-    print(f"\nConfiguration:")
-    print(f"  Data directory: {DATA_DIR}")
-    print(f"  Output directory: {OUTPUT_DIR}")
-    print(f"  Region: {'Global' if REGION is None else REGION}")
-    print(f"  Year: {YEAR}")
-    print(f"  Downsample factor: {DOWNSAMPLE}")
-    print(f"  SST range: {SST_VMIN}°C to {SST_VMAX}°C")
-    print(f"  Colormap: {SST_CMAP}")
-    print(f"  Daily plot: {month_name[DAILY_MONTH]} {YEAR}, "
-          f"days {DAILY_DAY_START}-{DAILY_DAY_END}")
-    print()
 
-    # Block 2: Explore dataset
-    all_files = explore_dataset(DATA_DIR)
+    # ---- Quick scan to discover years before asking full config ----
+    print("\nEnter the data directory to scan for available years first.")
+    data_dir = ask_path("Data directory (contains .nc files)", must_exist=True)
 
-    if len(all_files) == 0:
-        print("Exiting: No data files found.")
+    print("\nScanning dataset...")
+    all_files, available_years = scan_dataset(data_dir)
+
+    if not all_files:
+        print(f"\nERROR: No .nc files found in: {data_dir}")
         return
 
-    # Block 3: Monthly mean plots
-    monthly_plot_path = create_monthly_mean_plots(
-        all_files=all_files,
-        output_dir=OUTPUT_DIR,
-        year=YEAR,
-        region=REGION,
-        downsample=DOWNSAMPLE,
-        vmin=SST_VMIN,
-        vmax=SST_VMAX,
-        cmap=SST_CMAP
-    )
+    explore_dataset(all_files, available_years)
 
-    # Block 4: Daily plots
-    daily_plot_path = create_daily_plots(
-        all_files=all_files,
-        output_dir=OUTPUT_DIR,
-        year=YEAR,
-        month=DAILY_MONTH,
-        day_start=DAILY_DAY_START,
-        day_end=DAILY_DAY_END,
-        days_per_row=DAYS_PER_ROW,
-        region=REGION,
-        downsample=DOWNSAMPLE,
-        vmin=SST_VMIN,
-        vmax=SST_VMAX,
-        cmap=SST_CMAP
-    )
+    # ---- Collect the rest of the config ----
+    # Override data_dir with the one already entered above
+    cfg = collect_config(available_years)
+    cfg["data_dir"] = data_dir          # already entered, skip re-asking
 
-    # Final summary
     print("\n" + "=" * 70)
-    print("OUTPUT SUMMARY")
+    print("STARTING ANALYSIS")
     print("=" * 70)
-    print(f"\nMonthly mean plot: {monthly_plot_path}")
-    print(f"Daily plot: {daily_plot_path}")
-    print(f"Total files in dataset: {len(all_files)}")
-    print("\nAnalysis complete!")
+    region_label = ("Global" if cfg["region"] is None
+                    else str(cfg["region"]))
+    print(f"  Data dir   : {cfg['data_dir']}")
+    print(f"  Output dir : {cfg['output_dir']}")
+    print(f"  Region     : {region_label}")
+    print(f"  Year(s)    : {cfg['years']}")
+    print(f"  Monthly    : {cfg['do_monthly']}")
+    print(f"  Daily      : {cfg['do_daily']}")
+    if cfg["do_daily"]:
+        print(f"  Daily month: {month_name[cfg['daily_month']]}  "
+              f"days {cfg['daily_day_start']}–{cfg['daily_day_end']}")
+
+    saved_files = []
+
+    for year in cfg["years"]:
+        if cfg["do_monthly"]:
+            path = create_monthly_mean_plots(all_files, cfg, year)
+            if path:
+                saved_files.append(path)
+
+        if cfg["do_daily"]:
+            path = create_daily_plots(all_files, cfg, year)
+            if path:
+                saved_files.append(path)
+
+    print("\n" + "=" * 70)
+    print("DONE — output files:")
+    for p in saved_files:
+        print(f"  {p}")
+    print("=" * 70 + "\n")
 
 
 if __name__ == "__main__":

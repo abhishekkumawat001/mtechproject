@@ -1,3 +1,4 @@
+
 """
 Simplified SWOT Data Analysis Script
 A cleaned-up version with configuration file support and better error handling.
