@@ -1,4 +1,7 @@
-<h1 align="center">🌊 Cyclone Oceanic Response Analysis — 2024</h1>
+<h1 align="center">🌊 Multi-Scale Decomposition of Ocean Response to Tropical 
+Cyclones: Coupled Analysis of Sea Surface Temperature 
+and Sea Level Anomaly for the 2024 Global Cyclone 
+Season</h1>
 
 <p align="center">
   <em>Gaussian scale decomposition of satellite SST &amp; sea level anomaly across the full lifecycle of tropical cyclones</em>
