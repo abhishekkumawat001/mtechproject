@@ -123,7 +123,7 @@ SWOT_L2_LR_SSH_*/
 sar_extracted/
 sar_analysis_output/
 swot_analysis_output/
-
+not_tracked/
 # CSV output files
 *_summary_*.csv
 *_stats_*.csv
